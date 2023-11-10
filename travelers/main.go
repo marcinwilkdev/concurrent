@@ -41,7 +41,7 @@ func main() {
 	// Triggers print function
 	go func() {
 		for {
-			time.Sleep(1 * time.Second)
+			time.Sleep(100 * time.Millisecond)
 
 			printChan <- true
 		}
@@ -89,14 +89,6 @@ func main() {
 							printRequest.toX = tmpX
 							printRequest.toY = tmpY
 						}
-					}
-
-					for _, traveler := range travelers {
-						fmt.Println(traveler)
-					}
-
-					for _, printRequest := range printRequests {
-						fmt.Println(printRequest)
 					}
 
 					for j := 0; j < 3*m+2; j++ {
