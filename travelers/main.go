@@ -13,29 +13,36 @@ type Traveler struct {
 }
 
 type Request struct {
-	travelerId int
-	x, y       int
-	response   chan bool
+	travelerType int // 0 - normal, 1 - wild
+	travelerId   int
+	x, y         int
+	response     chan bool
 }
 
 type PrintRequest struct {
+	travelerType int
 	travelerId   int
 	fromX, fromY int
 	toX, toY     int
 }
 
-type Cell struct {
+type KillRequest struct {
 	travelerId int
-	requests   chan *Request
+}
+
+type Cell struct {
+	travelerType int
+	travelerId   int
+	requests     chan *Request
+	killRequests chan *KillRequest
 }
 
 func main() {
 	n := 10 // Number of rows
 	m := 10 // Number of columns
-	maxTravelers := 25
-	numTravelers := 0
 
 	printRequestsChan := make(chan *PrintRequest)
+	printKillChan := make(chan *KillRequest)
 	printChan := make(chan bool)
 
 	// Triggers print function
@@ -51,30 +58,62 @@ func main() {
 	go func() {
 		printRequests := make([]*PrintRequest, 0)
 		travelers := make([]*Traveler, 0)
+		wildLocators := make([]*Traveler, 0)
 
 		for {
 			select {
+			case killRequest := <-printKillChan:
+				{
+					for i := 0; i < len(wildLocators); i++ {
+						if wildLocators[i].id == killRequest.travelerId {
+							wildLocators = append(wildLocators[:i], wildLocators[i+1:]...)
+							break
+						}
+					}
+				}
 			case <-printChan:
 				{
 					for _, printRequest := range printRequests {
-						containsTraveler := false
+						if printRequest.travelerType == 0 {
+							containsTraveler := false
 
-						for _, traveler := range travelers {
-							if traveler.id == printRequest.travelerId {
-								traveler.x = printRequest.toX
-								traveler.y = printRequest.toY
+							for _, traveler := range travelers {
+								if traveler.id == printRequest.travelerId {
+									traveler.x = printRequest.toX
+									traveler.y = printRequest.toY
 
-								containsTraveler = true
-								break
+									containsTraveler = true
+									break
+								}
 							}
-						}
 
-						if !containsTraveler {
-							travelers = append(travelers, &Traveler{
-								id: printRequest.travelerId,
-								x:  printRequest.toX,
-								y:  printRequest.toY,
-							})
+							if !containsTraveler {
+								travelers = append(travelers, &Traveler{
+									id: printRequest.travelerId,
+									x:  printRequest.toX,
+									y:  printRequest.toY,
+								})
+							}
+						} else if printRequest.travelerType == 1 {
+							containsTraveler := false
+
+							for _, traveler := range wildLocators {
+								if traveler.id == printRequest.travelerId {
+									traveler.x = printRequest.toX
+									traveler.y = printRequest.toY
+
+									containsTraveler = true
+									break
+								}
+							}
+
+							if !containsTraveler {
+								wildLocators = append(wildLocators, &Traveler{
+									id: printRequest.travelerId,
+									x:  printRequest.toX,
+									y:  printRequest.toY,
+								})
+							}
 						}
 					}
 
@@ -103,6 +142,7 @@ func main() {
 						for i := 0; i < m; i++ {
 							foundMove := false
 							foundTraveler := false
+							foundWildTraveler := false
 							foundTravelerId := 0
 
 							for _, traveler := range travelers {
@@ -113,12 +153,21 @@ func main() {
 								}
 							}
 
+							for _, traveler := range wildLocators {
+								if traveler.x == i && traveler.y == j {
+									foundWildTraveler = true
+									break
+								}
+							}
+
 							if foundTraveler {
 								fmt.Print(foundTravelerId)
 
 								if foundTravelerId < 10 {
 									fmt.Print(" ")
 								}
+							} else if foundWildTraveler {
+								fmt.Print("* ")
 							} else {
 								fmt.Print("  ")
 							}
@@ -186,8 +235,9 @@ func main() {
 
 		for j := range grid[i] {
 			grid[i][j] = &Cell{
-				travelerId: -1,
-				requests:   make(chan *Request),
+				travelerId:   -1,
+				requests:     make(chan *Request),
+				killRequests: make(chan *KillRequest),
 			}
 		}
 	}
@@ -218,10 +268,18 @@ func main() {
 								grid[i][j].travelerId = -1
 							}
 						}
+					case killRequest := <-grid[i][j].killRequests:
+						{
+							if grid[i][j].travelerId == killRequest.travelerId && grid[i][j].travelerType == 1 {
+								grid[i][j].travelerId = -1
+
+								printKillChan <- killRequest
+							}
+						}
 					case <-moveChan:
 						{
 							// Move traveler to adjacent field
-							if grid[i][j].travelerId != -1 {
+							if grid[i][j].travelerId != -1 && grid[i][j].travelerType == 0 {
 								directions := [][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
 								move := directions[rand.Intn(4)]
 								newRow, newCol := i+move[0], j+move[1]
@@ -240,15 +298,56 @@ func main() {
 						{
 							// Handle move request
 							if grid[i][j].travelerId == -1 {
+								grid[i][j].travelerType = request.travelerType
 								grid[i][j].travelerId = request.travelerId
+
 								request.response <- true
 
 								printRequestsChan <- &PrintRequest{
-									travelerId: request.travelerId,
-									fromX:      request.x,
-									fromY:      request.y,
-									toX:        i,
-									toY:        j,
+									travelerType: request.travelerType,
+									travelerId:   request.travelerId,
+									fromX:        request.x,
+									fromY:        request.y,
+									toX:          i,
+									toY:          j,
+								}
+							} else if grid[i][j].travelerType == 1 && request.travelerType == 0 {
+								directions := [][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
+
+								for _, move := range directions {
+									newRow, newCol := i+move[0], j+move[1]
+
+									if newRow >= 0 && newRow < n && newCol >= 0 && newCol < m {
+										responseChan := make(chan bool)
+
+										grid[newRow][newCol].requests <- &Request{
+											travelerType: 1,
+											travelerId:   grid[i][j].travelerId,
+											x:            i,
+											y:            j,
+											response:     responseChan,
+										}
+
+										response := <-responseChan
+
+										if response {
+											grid[i][j].travelerType = request.travelerType
+											grid[i][j].travelerId = request.travelerId
+
+											request.response <- true
+
+											printRequestsChan <- &PrintRequest{
+												travelerType: request.travelerType,
+												travelerId:   request.travelerId,
+												fromX:        request.x,
+												fromY:        request.y,
+												toX:          i,
+												toY:          j,
+											}
+
+											break
+										}
+									}
 								}
 							} else {
 								request.response <- false
@@ -261,27 +360,77 @@ func main() {
 	}
 
 	// Create travelers
-	for numTravelers < maxTravelers {
-		time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+	go func() {
+		maxTravelers := 25
+		numTravelers := 0
 
-		x := rand.Intn(n)
-		y := rand.Intn(m)
+		for numTravelers < maxTravelers {
+			time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
 
-		responseChan := make(chan bool)
+			x := rand.Intn(n)
+			y := rand.Intn(m)
 
-		grid[x][y].requests <- &Request{
-			travelerId: numTravelers,
-			x:          -1,
-			y:          -1,
-			response:   responseChan,
+			responseChan := make(chan bool)
+
+			grid[x][y].requests <- &Request{
+				travelerType: 0,
+				travelerId:   numTravelers,
+				x:            -1,
+				y:            -1,
+				response:     responseChan,
+			}
+
+			response := <-responseChan
+
+			if response {
+				numTravelers++
+			}
 		}
+	}()
 
-		response := <-responseChan
+	wildLocatorLifetime := 5000 * time.Millisecond
 
-		if response {
-			numTravelers++
+	// Create wild locator
+	go func() {
+		travelerId := 0
+
+		for {
+			time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+
+			x := rand.Intn(n)
+			y := rand.Intn(m)
+
+			responseChan := make(chan bool)
+
+			grid[x][y].requests <- &Request{
+				travelerType: 1,
+				travelerId:   travelerId,
+				x:            -1,
+				y:            -1,
+				response:     responseChan,
+			}
+
+			response := <-responseChan
+
+			if response {
+				internalId := travelerId
+
+				go func() {
+					time.Sleep(wildLocatorLifetime)
+
+					for i := range grid {
+						for j := range grid[i] {
+							grid[i][j].killRequests <- &KillRequest{
+								travelerId: internalId,
+							}
+						}
+					}
+				}()
+
+				travelerId++
+			}
 		}
-	}
+	}()
 
 	select {}
 }
