@@ -27,7 +27,8 @@ type PrintRequest struct {
 }
 
 type KillRequest struct {
-	travelerId int
+	travelerId   int
+	travelerType int
 }
 
 type Cell struct {
@@ -59,15 +60,25 @@ func main() {
 		printRequests := make([]*PrintRequest, 0)
 		travelers := make([]*Traveler, 0)
 		wildLocators := make([]*Traveler, 0)
+		threats := make([]*Traveler, 0)
 
 		for {
 			select {
 			case killRequest := <-printKillChan:
 				{
-					for i := 0; i < len(wildLocators); i++ {
-						if wildLocators[i].id == killRequest.travelerId {
-							wildLocators = append(wildLocators[:i], wildLocators[i+1:]...)
-							break
+					if killRequest.travelerType == 1 {
+						for i := 0; i < len(wildLocators); i++ {
+							if wildLocators[i].id == killRequest.travelerId {
+								wildLocators = append(wildLocators[:i], wildLocators[i+1:]...)
+								break
+							}
+						}
+					} else if killRequest.travelerType == 2 {
+						for i := 0; i < len(threats); i++ {
+							if threats[i].id == killRequest.travelerId {
+								threats = append(threats[:i], threats[i+1:]...)
+								break
+							}
 						}
 					}
 				}
@@ -114,6 +125,12 @@ func main() {
 									y:  printRequest.toY,
 								})
 							}
+						} else if printRequest.travelerType == 2 {
+							threats = append(threats, &Traveler{
+								id: printRequest.travelerId,
+								x:  printRequest.toX,
+								y:  printRequest.toY,
+							})
 						}
 					}
 
@@ -143,6 +160,7 @@ func main() {
 							foundMove := false
 							foundTraveler := false
 							foundWildTraveler := false
+							foundThreat := false
 							foundTravelerId := 0
 
 							for _, traveler := range travelers {
@@ -160,6 +178,13 @@ func main() {
 								}
 							}
 
+							for _, traveler := range threats {
+								if traveler.x == i && traveler.y == j {
+									foundThreat = true
+									break
+								}
+							}
+
 							if foundTraveler {
 								fmt.Print(foundTravelerId)
 
@@ -168,6 +193,8 @@ func main() {
 								}
 							} else if foundWildTraveler {
 								fmt.Print("* ")
+							} else if foundThreat {
+								fmt.Print("# ")
 							} else {
 								fmt.Print("  ")
 							}
@@ -270,7 +297,8 @@ func main() {
 						}
 					case killRequest := <-grid[i][j].killRequests:
 						{
-							if grid[i][j].travelerId == killRequest.travelerId && grid[i][j].travelerType == 1 {
+							if grid[i][j].travelerId == killRequest.travelerId && grid[i][j].travelerType == killRequest.travelerType {
+								fmt.Println(killRequest)
 								grid[i][j].travelerId = -1
 
 								printKillChan <- killRequest
@@ -349,6 +377,15 @@ func main() {
 										}
 									}
 								}
+							} else if grid[i][j].travelerType == 2 && request.travelerType == 0 {
+								fmt.Println("SHOW")
+
+								grid[i][j].travelerId = -1
+
+								printKillChan <- &KillRequest{
+									travelerType: 2,
+									travelerId:   grid[i][j].travelerId,
+								}
 							} else {
 								request.response <- false
 							}
@@ -421,9 +458,51 @@ func main() {
 					for i := range grid {
 						for j := range grid[i] {
 							grid[i][j].killRequests <- &KillRequest{
-								travelerId: internalId,
+								travelerType: 1,
+								travelerId:   internalId,
 							}
 						}
+					}
+				}()
+
+				travelerId++
+			}
+		}
+	}()
+
+	threatLifetime := 2000 * time.Millisecond
+
+	// Create threat
+	go func() {
+		travelerId := 0
+
+		for {
+			time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+
+			x := rand.Intn(n)
+			y := rand.Intn(m)
+
+			responseChan := make(chan bool)
+
+			grid[x][y].requests <- &Request{
+				travelerType: 2,
+				travelerId:   travelerId,
+				x:            -1,
+				y:            -1,
+				response:     responseChan,
+			}
+
+			response := <-responseChan
+
+			if response {
+				internalId := travelerId
+
+				go func() {
+					time.Sleep(threatLifetime)
+
+					grid[x][y].killRequests <- &KillRequest{
+						travelerType: 2,
+						travelerId:   internalId,
 					}
 				}()
 
