@@ -3,212 +3,293 @@ package main
 import (
 	"fmt"
 	"math/rand"
-	"sync"
 	"time"
 )
 
 type Traveler struct {
 	id int
-	row, col int
+	x  int
+	y  int
 }
 
-type MoveToPrint struct {
-	row, col, newRow, newCol int
+type Request struct {
+	travelerId int
+	x, y       int
+	response   chan bool
+}
+
+type PrintRequest struct {
+	travelerId   int
+	fromX, fromY int
+	toX, toY     int
+}
+
+type Cell struct {
+	travelerId int
+	requests   chan *Request
 }
 
 func main() {
-	rand.Seed(time.Now().UnixNano())
-
 	n := 10 // Number of rows
 	m := 10 // Number of columns
-	numTravelers := 25
+	maxTravelers := 25
+	numTravelers := 0
 
-	travelers := make([]Traveler, 0, numTravelers)
-	movesToPrint := []MoveToPrint{}
+	printRequestsChan := make(chan *PrintRequest)
+	printChan := make(chan bool)
 
-	var mutex sync.Mutex
-
-	// Function to print the grid
-	printGrid := func() {
-		mutex.Lock()
-		defer mutex.Unlock()
-
-		for j := 0; j < 3 * m + 2; j++ {
-			fmt.Print("#")
-		}
-
-		fmt.Println()
-
-		for i := 0; i < n; i++ {
-			fmt.Print("#")
-
-			for j := 0; j < m; j++ {
-				foundMove := false
-				foundTraveler := false
-				foundTravelerId := 0
-
-				for _, traveler := range travelers {
-					if traveler.row == i && traveler.col == j {
-						foundTraveler = true
-						foundTravelerId = traveler.id
-						break
-					}
-				}
-
-				if foundTraveler {
-					fmt.Print(foundTravelerId)
-
-					if foundTravelerId < 10 {
-						fmt.Print(" ")
-					}
-				} else {
-					fmt.Print("  ")
-				}
-
-				for _, moveToPrint := range movesToPrint {
-					if moveToPrint.row == i && moveToPrint.col == j {
-						if moveToPrint.newCol > moveToPrint.col {
-							fmt.Print("-")
-							foundMove = true
-							break
-						}
-					}
-				}
-
-				if !foundMove {
-					fmt.Print(" ")
-				}
-			}
-
-			fmt.Println("#")
-			fmt.Print("#")
-
-			for j := 0; j < m; j++ {
-				foundMove := false
-
-				for _, moveToPrint := range movesToPrint {
-					if moveToPrint.row == i && moveToPrint.col == j {
-						if moveToPrint.newRow > moveToPrint.row {
-							fmt.Print("|  ")
-
-							foundMove = true
-							break
-						}
-					}
-				}
-
-				if !foundMove {
-					fmt.Print("   ")
-				}
-			}
-
-			fmt.Println("#")
-		}
-
-		for j := 0; j < 3 * m + 2; j++ {
-			fmt.Print("#")
-		}
-
-		fmt.Println()
-
-		movesToPrint = []MoveToPrint{}
-	}
-
-	// Start a goroutine to periodically print the grid
+	// Triggers print function
 	go func() {
 		for {
-			printGrid()
-			time.Sleep(1 * time.Second) // Adjust the interval as needed
+			time.Sleep(1 * time.Second)
+
+			printChan <- true
 		}
 	}()
 
-	// Function to simulate traveler movement
-	moveTraveler := func(traveler *Traveler) {
+	// Print function logic
+	go func() {
+		printRequests := make([]*PrintRequest, 0)
+		travelers := make([]*Traveler, 0)
+
 		for {
-			mutex.Lock()
-			// Generate a random direction
-			directions := [][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
-			move := directions[rand.Intn(4)]
-			newRow, newCol := traveler.row+move[0], traveler.col+move[1]
+			select {
+			case <-printChan:
+				{
+					for _, printRequest := range printRequests {
+						containsTraveler := false
 
-			// Check if the new position is within the grid and not occupied
-			if newRow >= 0 && newRow < n && newCol >= 0 && newCol < m {
-				// Check if the new position is unoccupied
-				isOccupied := false
+						for _, traveler := range travelers {
+							if traveler.id == printRequest.travelerId {
+								traveler.x = printRequest.toX
+								traveler.y = printRequest.toY
 
-				for _, otherTraveler := range travelers {
-					if otherTraveler.row == newRow && otherTraveler.col == newCol {
-						isOccupied = true
-						break
+								containsTraveler = true
+								break
+							}
+						}
+
+						if !containsTraveler {
+							travelers = append(travelers, &Traveler{
+								id: printRequest.travelerId,
+								x:  printRequest.toX,
+								y:  printRequest.toY,
+							})
+						}
 					}
+
+					for _, printRequest := range printRequests {
+						if printRequest.fromX > printRequest.toX || printRequest.fromY > printRequest.toY {
+							tmpX := printRequest.fromX
+							tmpY := printRequest.fromY
+
+							printRequest.fromX = printRequest.toX
+							printRequest.fromY = printRequest.toY
+
+							printRequest.toX = tmpX
+							printRequest.toY = tmpY
+						}
+					}
+
+					for _, traveler := range travelers {
+						fmt.Println(traveler)
+					}
+
+					for _, printRequest := range printRequests {
+						fmt.Println(printRequest)
+					}
+
+					for j := 0; j < 3*m+2; j++ {
+						fmt.Print("#")
+					}
+
+					fmt.Println()
+
+					for j := 0; j < n; j++ {
+						fmt.Print("#")
+
+						for i := 0; i < m; i++ {
+							foundMove := false
+							foundTraveler := false
+							foundTravelerId := 0
+
+							for _, traveler := range travelers {
+								if traveler.x == i && traveler.y == j {
+									foundTraveler = true
+									foundTravelerId = traveler.id
+									break
+								}
+							}
+
+							if foundTraveler {
+								fmt.Print(foundTravelerId)
+
+								if foundTravelerId < 10 {
+									fmt.Print(" ")
+								}
+							} else {
+								fmt.Print("  ")
+							}
+
+							for _, printRequest := range printRequests {
+								if printRequest.fromX > -1 && printRequest.fromX == i && printRequest.fromY == j {
+									if printRequest.toX > printRequest.fromX {
+										fmt.Print("-")
+										foundMove = true
+										break
+									}
+								}
+							}
+
+							if !foundMove {
+								fmt.Print(" ")
+							}
+						}
+
+						fmt.Println("#")
+						fmt.Print("#")
+
+						for i := 0; i < m; i++ {
+							foundMove := false
+
+							for _, printRequest := range printRequests {
+								if printRequest.fromX > -1 && printRequest.fromX == i && printRequest.fromY == j {
+									if printRequest.toY > printRequest.fromY {
+										fmt.Print("|  ")
+
+										foundMove = true
+										break
+									}
+								}
+							}
+
+							if !foundMove {
+								fmt.Print("   ")
+							}
+						}
+
+						fmt.Println("#")
+					}
+
+					for j := 0; j < 3*m+2; j++ {
+						fmt.Print("#")
+					}
+
+					fmt.Println()
+
+					printRequests = printRequests[:0]
 				}
-
-				if !isOccupied {
-					if traveler.row < newRow || traveler.col < newCol {
-						moveToPrint := MoveToPrint{
-							row: traveler.row,
-							col: traveler.col,
-							newRow: newRow,
-							newCol: newCol,
-						}
-
-						movesToPrint = append(movesToPrint, moveToPrint)
-					} else {
-						moveToPrint := MoveToPrint{
-							row: newRow,
-							col: newCol,
-							newRow: traveler.row,
-							newCol: traveler.col,
-						}
-
-						movesToPrint = append(movesToPrint, moveToPrint)
-					}
-
-					// Move the traveler to the new position
-					traveler.row, traveler.col = newRow, newCol
+			case printRequest := <-printRequestsChan:
+				{
+					printRequests = append(printRequests, printRequest)
 				}
 			}
+		}
+	}()
 
-			mutex.Unlock()
+	// Create grid
+	grid := make([][]*Cell, n)
+	for i := range grid {
+		grid[i] = make([]*Cell, m)
 
-			// Sleep for a random duration before the next move
-			time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+		for j := range grid[i] {
+			grid[i][j] = &Cell{
+				travelerId: -1,
+				requests:   make(chan *Request),
+			}
 		}
 	}
 
-	// Create and start multiple travelers
-	travelerId := 0
+	// Launch cell goroutines
+	for i := range grid {
+		for j := range grid[i] {
+			moveChan := make(chan bool)
 
-	for len(travelers) < numTravelers {
-		mutex.Lock()
+			// Triggers move
+			go func() {
+				for {
+					time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
 
-		row := rand.Intn(n)
-		col := rand.Intn(m)
+					moveChan <- true
+				}
+			}()
 
-		isOccupied := false
+			go func(i, j int) {
+				responseChan := make(chan bool)
 
-		for _, otherTraveler := range travelers {
-			if otherTraveler.row == row && otherTraveler.col == col {
-				isOccupied = true
-				mutex.Unlock()
-				break
-			}
-		}
+				for {
+					select {
+					case response := <-responseChan:
+						{
+							// Succesfully move traveler
+							if response {
+								grid[i][j].travelerId = -1
+							}
+						}
+					case <-moveChan:
+						{
+							// Move traveler to adjacent field
+							if grid[i][j].travelerId != -1 {
+								directions := [][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
+								move := directions[rand.Intn(4)]
+								newRow, newCol := i+move[0], j+move[1]
 
-		if !isOccupied {
-			traveler := Traveler{id: travelerId, row: rand.Intn(n), col: rand.Intn(m)}
-			travelers = append(travelers, traveler)
-			go moveTraveler(&travelers[len(travelers) - 1])
+								if newRow >= 0 && newRow < n && newCol >= 0 && newCol < m {
+									grid[newRow][newCol].requests <- &Request{
+										travelerId: grid[i][j].travelerId,
+										x:          i,
+										y:          j,
+										response:   responseChan,
+									}
+								}
+							}
+						}
+					case request := <-grid[i][j].requests:
+						{
+							// Handle move request
+							if grid[i][j].travelerId == -1 {
+								grid[i][j].travelerId = request.travelerId
+								request.response <- true
 
-			travelerId += 1
-
-			mutex.Unlock()
-
-			// Sleep for a random duration before the next traveler
-			time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+								printRequestsChan <- &PrintRequest{
+									travelerId: request.travelerId,
+									fromX:      request.x,
+									fromY:      request.y,
+									toX:        i,
+									toY:        j,
+								}
+							} else {
+								request.response <- false
+							}
+						}
+					}
+				}
+			}(i, j)
 		}
 	}
 
-	// Run the program indefinitely
+	// Create travelers
+	for numTravelers < maxTravelers {
+		time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+
+		x := rand.Intn(n)
+		y := rand.Intn(m)
+
+		responseChan := make(chan bool)
+
+		grid[x][y].requests <- &Request{
+			travelerId: numTravelers,
+			x:          -1,
+			y:          -1,
+			response:   responseChan,
+		}
+
+		response := <-responseChan
+
+		if response {
+			numTravelers++
+		}
+	}
+
 	select {}
 }
