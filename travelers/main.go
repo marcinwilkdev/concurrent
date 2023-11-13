@@ -80,6 +80,13 @@ func main() {
 								break
 							}
 						}
+					} else if killRequest.travelerType == 0 {
+						for i := 0; i < len(travelers); i++ {
+							if travelers[i].id == killRequest.travelerId {
+								travelers = append(travelers[:i], travelers[i+1:]...)
+								break
+							}
+						}
 					}
 				}
 			case <-printChan:
@@ -298,7 +305,6 @@ func main() {
 					case killRequest := <-grid[i][j].killRequests:
 						{
 							if grid[i][j].travelerId == killRequest.travelerId && grid[i][j].travelerType == killRequest.travelerType {
-								fmt.Println(killRequest)
 								grid[i][j].travelerId = -1
 
 								printKillChan <- killRequest
@@ -378,13 +384,16 @@ func main() {
 									}
 								}
 							} else if grid[i][j].travelerType == 2 && request.travelerType == 0 {
-								fmt.Println("SHOW")
-
-								grid[i][j].travelerId = -1
+								localTravelerId := grid[i][j].travelerId
 
 								printKillChan <- &KillRequest{
 									travelerType: 2,
-									travelerId:   grid[i][j].travelerId,
+									travelerId:   localTravelerId,
+								}
+
+								grid[request.x][request.y].killRequests <- &KillRequest{
+									travelerType: 0,
+									travelerId:   request.travelerId,
 								}
 							} else {
 								request.response <- false
