@@ -49,7 +49,7 @@ func main() {
 	// Triggers print function
 	go func() {
 		for {
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 
 			printChan <- true
 		}
@@ -391,9 +391,11 @@ func main() {
 									travelerId:   localTravelerId,
 								}
 
-								grid[request.x][request.y].killRequests <- &KillRequest{
-									travelerType: 0,
-									travelerId:   request.travelerId,
+								if request.x > -1 {
+									grid[request.x][request.y].killRequests <- &KillRequest{
+										travelerType: 0,
+										travelerId:   request.travelerId,
+									}
 								}
 							} else {
 								request.response <- false
